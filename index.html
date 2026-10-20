@@ -42,11 +42,11 @@ async function logout(){if(busy){toast('자료 처리 후 잠가 주세요.');re
 function yearRef(y=year){return F.doc(fire,'families',family,'years',String(y))}
 function entryCollection(y=year,g=activeGeneration){return F.collection(fire,'families',family,'years',String(y),'generations',g,'entries')}
 async function ensureYear(y){const ref=yearRef(y);await F.runTransaction(fire,async tx=>{const snap=await tx.get(ref);if(!snap.exists())tx.set(ref,{activeGeneration:'main',annualNote:'',revision:0,updatedAt:Date.now()})});return ref}
-async function loadYear(y){if(unsubscribeMeta)unsubscribeMeta();if(unsubscribeEntries)unsubscribeEntries();unsubscribeMeta=unsubscribeEntries=null;ready=false;year=y;db={records:[],annualNote:''};$('#modal').close();const token=epoch;try{const ref=await ensureYear(y);if(token!==epoch||year!==y)return;$('#gate').hidden=true;$('#appMain').hidden=false;render();status(y+'년 불러오는 중');unsubscribeMeta=F.onSnapshot(ref,{includeMetadataChanges:true},snap=>{if(token!==epoch||year!==y)return;if(!snap.exists())return;const next=snap.data();db.annualNote=next.annualNote||'';meta=next;if(activeGeneration!==next.activeGeneration||!unsubscribeEntries){activeGeneration=next.activeGeneration;ready=false;db.records=[];if(unsubscribeEntries)unsubscribeEntries();const gen=activeGeneration;unsubscribeEntries=F.onSnapshot(entryCollection(y,gen),{includeMetadataChanges:true},entries=>{if(token!==epoch||year!==y||gen!==activeGeneration)return;db.records=entries.docs.map(d=>d.data()).sort((a,b)=>a.month-b.month||a.group-b.group||a.id.localeCompare(b.id,'en',{numeric:true}));ready=!entries.metadata.fromCache&&!entries.metadata.hasPendingWrites;status(ready?'Firebase 동기화 완료':navigator.onLine?'서버 확인 중':'오프라인 · 읽기 전용');refresh();if(ready)applyOriginalLedgerIfEmpty()},e=>{ready=false;status('자료 읽기 실패',true);showError(e)})}else refresh()},e=>{ready=false;showError(e)});}catch(e){ready=false;showError(e)}}
-async function changeYear(y){if(!validYear(y)){toast('1900~9999년 사이의 연도를 입력해 주세요.');$('#yearInput').value=year;return}if(busy){toast('자료 처리 후 연도를 바꿔 주세요.');return}if(!ready&&mode==='cloud'){toast('자료를 불러오는 중입니다.');return}if($('#modal').open){toast('수정 창을 닫은 뒤 연도를 바꿔 주세요.');return}if(mode==='cloud')await loadYear(y);else if(mode==='local'){year=y;db=structuredClone(localStore.years[year]||{records:[],annualNote:''});render()}}
+async function loadYear(y){if(unsubscribeMeta)unsubscribeMeta();if(unsubscribeEntries)unsubscribeEntries();unsubscribeMeta=unsubscribeEntries=null;ready=false;year=y;db={records:[],annualNote:''};$('#modal').close();const token=epoch;try{const ref=await ensureYear(y);if(token!==epoch||year!==y)return;$('#gate').hidden=true;$('#appMain').hidden=false;render();status(y+'년 불러오는 중');unsubscribeMeta=F.onSnapshot(ref,{includeMetadataChanges:true},snap=>{if(token!==epoch||year!==y)return;if(!snap.exists())return;const next=snap.data();db.annualNote=next.annualNote||'';meta=next;if(activeGeneration!==next.activeGeneration||!unsubscribeEntries){activeGeneration=next.activeGeneration;ready=false;db.records=[];if(unsubscribeEntries)unsubscribeEntries();const gen=activeGeneration;unsubscribeEntries=F.onSnapshot(entryCollection(y,gen),{includeMetadataChanges:true},entries=>{if(token!==epoch||year!==y||gen!==activeGeneration)return;db.records=entries.docs.map(d=>d.data()).sort((a,b)=>a.month-b.month||a.group-b.group||a.id.localeCompare(b.id,'en',{numeric:true}));ready=!entries.metadata.fromCache&&!entries.metadata.hasPendingWrites;status(ready?'Firebase 동기화 완료':navigator.onLine?'서버 확인 중':'오프라인 · 읽기 전용');refresh();if(ready){applyOriginalLedgerIfEmpty();applySeptemberFixedExpenses()}},e=>{ready=false;status('자료 읽기 실패',true);showError(e)})}else refresh()},e=>{ready=false;showError(e)});}catch(e){ready=false;showError(e)}}
+async function changeYear(y){if(!validYear(y)){toast('1900~9999년 사이의 연도를 입력해 주세요.');$('#yearInput').value=year;return}if(busy){toast('자료 처리 후 연도를 바꿔 주세요.');return}if(!ready&&mode==='cloud'){toast('자료를 불러오는 중입니다.');return}if($('#modal').open){toast('수정 창을 닫은 뒤 연도를 바꿔 주세요.');return}if(mode==='cloud')await loadYear(y);else if(mode==='local'){year=y;db=structuredClone(localStore.years[year]||{records:[],annualNote:''});render();applySeptemberFixedExpenses()}}
 function addYear(){const v=prompt('사용할 연도를 입력하세요. (1900~9999)',String(year));if(v!==null)changeYear(Number(v))}
 function saveLocal(){localStore.years[year]=structuredClone(db);localStorage.setItem(LOCAL_KEY,JSON.stringify(localStore));render()}
-function startLocal(){if(busy)return;clearListeners();mode='local';role='owner';currentUser=null;try{localStore=JSON.parse(localStorage.getItem(LOCAL_KEY))||{years:{}};if(!localStore.years)localStore={years:{}}}catch{localStore={years:{}}}db=structuredClone(localStore.years[year]||{records:[],annualNote:''});ready=true;if(ORIGINAL_LEDGER&&!localStore.original2026Applied&&!localStore.years[2026]?.records?.length&&!localStore.years[2026]?.annualNote){localStore.years[2026]={records:ORIGINAL_LEDGER.records.map(r=>({...cleanRecord(r),year:2026})),annualNote:ORIGINAL_LEDGER.annualNote||''};localStore.original2026Applied=true;try{localStorage.setItem(LOCAL_KEY,JSON.stringify(localStore));db=structuredClone(localStore.years[year]||{records:[],annualNote:''})}catch(e){showError(Error('기존 자료 저장에 실패했습니다. 저장 공간을 확인해 주세요.'))}}$('#gate').hidden=true;$('#appMain').hidden=false;$('#logout').hidden=false;$('#identity').textContent='기기 전용 모드';status('이 브라우저에만 저장');render()}
+function startLocal(){if(busy)return;clearListeners();mode='local';role='owner';currentUser=null;try{localStore=JSON.parse(localStorage.getItem(LOCAL_KEY))||{years:{}};if(!localStore.years)localStore={years:{}}}catch{localStore={years:{}}}db=structuredClone(localStore.years[year]||{records:[],annualNote:''});ready=true;if(ORIGINAL_LEDGER&&!localStore.original2026Applied&&!localStore.years[2026]?.records?.length&&!localStore.years[2026]?.annualNote){localStore.years[2026]={records:ORIGINAL_LEDGER.records.map(r=>({...cleanRecord(r),year:2026})),annualNote:ORIGINAL_LEDGER.annualNote||''};localStore.original2026Applied=true;try{localStorage.setItem(LOCAL_KEY,JSON.stringify(localStore));db=structuredClone(localStore.years[year]||{records:[],annualNote:''})}catch(e){showError(Error('기존 자료 저장에 실패했습니다. 저장 공간을 확인해 주세요.'))}}$('#gate').hidden=true;$('#appMain').hidden=false;$('#logout').hidden=false;$('#identity').textContent='기기 전용 모드';status('이 브라우저에만 저장');render();applySeptemberFixedExpenses()}
 async function writeRecord(record,base){if(mode==='local'){const previous=structuredClone(db);if(record){if(base)db.records[db.records.findIndex(r=>r.id===base.id)]=record;else db.records.push(record)}else db.records=db.records.filter(r=>r.id!==base.id);try{saveLocal()}catch(e){db=previous;throw Error('브라우저 저장에 실패했습니다. 백업 후 저장 공간을 확인해 주세요.')}return}const y=year,g=activeGeneration,id=record?.id||base.id,expected=base?.rev||0;const ref=F.doc(entryCollection(y,g),id);await F.runTransaction(fire,async tx=>{const [ys,rs]=await Promise.all([tx.get(yearRef(y)),tx.get(ref)]);if(ys.data()?.activeGeneration!==g||(record&&$('#modal').open&&editingCloudGen!==g))throw Error('복원으로 자료가 변경되었습니다. 창을 닫고 다시 열어 주세요.');if(base?(!rs.exists()||rs.data().rev!==expected):rs.exists())throw Error('가족이 이 내역을 변경했습니다. 창을 닫고 최신 내역을 확인해 주세요.');if(record)tx.set(ref,{...cleanRecord(record),rev:expected+1});else tx.delete(ref);tx.update(yearRef(y),{revision:ys.data().revision+1,updatedAt:Date.now()})})}
 async function saveNote(text,base){if(!readyForEdit())return;if(text.length>20000){toast('연간 메모는 20,000자 이내입니다.');return}try{if(mode==='local'){const prev=db.annualNote;db.annualNote=text;try{saveLocal()}catch(e){db.annualNote=prev;throw e}}else{await F.runTransaction(fire,async tx=>{const ref=yearRef(),snap=await tx.get(ref);if(snap.data().annualNote!==(base||''))throw Error('가족이 연간 메모를 수정했습니다. 최신 내용을 확인한 뒤 다시 저장해 주세요.');tx.update(ref,{annualNote:text,revision:snap.data().revision+1,updatedAt:Date.now()})})}toast('메모를 저장했습니다')}catch(e){showError(e)}}
 async function restoreYear(y,records,note,onlyIfPristine=false){if(busy)throw Error('이미 자료를 처리 중입니다.');busy=true;try{if(mode==='local'){const previous=structuredClone(localStore);localStore.years[y]={records,annualNote:note};try{localStorage.setItem(LOCAL_KEY,JSON.stringify(localStore))}catch(e){localStore=previous;throw e}year=y;db=structuredClone(localStore.years[y]);render();return}if(role!=='owner')throw Error('관리자만 복원할 수 있습니다.');if(!navigator.onLine)throw Error('온라인에서만 복원할 수 있습니다.');const ref=await ensureYear(y),before=await F.getDocFromServer(ref),expected=before.data(),gen='restore-'+newId();if(onlyIfPristine&&(expected.revision!==0||expected.annualNote))throw Error('이미 변경된 연도이므로 기존 자료 자동 적용을 건너뛰었습니다.');status('복원 준비 중 · 기존 자료는 유지됩니다');for(let i=0;i<records.length;i+=250){const batch=F.writeBatch(fire);for(const r of records.slice(i,i+250))batch.set(F.doc(entryCollection(y,gen),r.id),{...cleanRecord(r),rev:1});await batch.commit();status('자료 이전 중 '+Math.min(i+250,records.length)+' / '+records.length)}await F.runTransaction(fire,async tx=>{const now=await tx.get(ref);if(now.data().revision!==expected.revision||now.data().activeGeneration!==expected.activeGeneration)throw Error('이전 중 가족이 자료를 수정했습니다. 기존 자료는 유지되며 복원이 적용되지 않았습니다. 다시 시도해 주세요.');tx.update(ref,{activeGeneration:gen,annualNote:note,revision:now.data().revision+1,updatedAt:Date.now()})});await loadYear(y)}finally{busy=false}}
@@ -56,6 +56,55 @@ async function applyOriginalLedgerIfEmpty(){
  if(!ORIGINAL_LEDGER||originalImportAttempted||originalImportRunning||busy||mode!=='cloud'||role!=='owner'||year!==2026||!ready||db.records.length||db.annualNote||meta?.revision!==0)return;
  originalImportAttempted=true;originalImportRunning=true;
  try{await restoreYear(2026,ORIGINAL_LEDGER.records.map(r=>({...cleanRecord(r),year:2026})),ORIGINAL_LEDGER.annualNote||'',true);toast('기존 엑셀의 2026년 내역을 적용했습니다.')}catch(e){showError(e)}finally{originalImportRunning=false}
+}
+
+
+// Apply September 2026 fixed expenses once to each target year.
+let septemberFixRunning=false;
+function septemberFixedRecords(records,sourceRecords=records,targetYear=2026){
+ const source=sourceRecords.filter(r=>r.month===9&&r.group===1);
+ if(!source.length)return null;
+ const months=Array.from({length:targetYear===2026?3:12},(_,i)=>i+(targetYear===2026?10:1));
+ return records.filter(r=>!(months.includes(r.month)&&r.group===1)).map(r=>({...r})).concat(months.flatMap(m=>source.map((r,i)=>({...cleanRecord(r),id:'sept2026-'+m+'-'+i,year:targetYear,month:m}))));
+}
+async function applySeptemberFixedExpenses(){
+ if(septemberFixRunning||busy||!ready||year<2026)return;
+ const y=year,prefix=y===2026?'septfixed2026-':'septfixedfuture2026-';
+ if(mode==='local'){
+  if(y===2026?localStore.septemberFixed2026Applied:localStore.septemberFixedYears?.[y])return;
+  const next=septemberFixedRecords(db.records,localStore.years[2026]?.records||[],y);if(!next)return;
+  const previous=structuredClone(localStore),oldDb=db;
+  try{db={...db,records:next};if(y===2026)localStore.septemberFixed2026Applied=true;else{localStore.septemberFixedYears||={};localStore.septemberFixedYears[y]=true}saveLocal();toast(y+'년 고정지출을 2026년 9월 기준으로 적용했습니다.')}catch(e){localStore=previous;db=oldDb;showError(e)}
+  return;
+ }
+ if(mode!=='cloud'||role!=='owner'||activeGeneration.startsWith(prefix))return;
+ septemberFixRunning=true;busy=true;
+ const g=activeGeneration,expected=meta.revision,token=epoch,note=db.annualNote,existing=structuredClone(db.records),gen=prefix+newId();
+ try{
+  if(!navigator.onLine)throw Error('인터넷 연결 후 고정지출을 적용할 수 있습니다.');
+  let source=existing,sourceMeta=null;
+  if(y>2026){
+   const snap=await F.getDocFromServer(yearRef(2026));
+   if(!snap.exists())return;
+   sourceMeta=snap.data();
+   const entries=await F.getDocsFromServer(entryCollection(2026,sourceMeta.activeGeneration));
+   source=entries.docs.map(d=>d.data());
+  }
+  const next=septemberFixedRecords(existing,source,y);if(!next)return;
+  for(let i=0;i<next.length;i+=250){
+   if(token!==epoch||mode!=='cloud'||year!==y)throw Error('연결 상태가 바뀌었습니다. 다시 접속해 주세요.');
+   const batch=F.writeBatch(fire);
+   for(const r of next.slice(i,i+250))batch.set(F.doc(entryCollection(y,gen),r.id),{...cleanRecord(r),rev:1});
+   await batch.commit();
+  }
+  await F.runTransaction(fire,async tx=>{
+   const ref=yearRef(y),snap=await tx.get(ref),now=snap.data();
+   if(sourceMeta){const sourceSnap=await tx.get(yearRef(2026));if(sourceSnap.data()?.revision!==sourceMeta.revision||sourceSnap.data()?.activeGeneration!==sourceMeta.activeGeneration)throw Error('기준 자료가 변경되었습니다. 새로고침 후 다시 적용해 주세요.');}
+   if(token!==epoch||now.activeGeneration!==g||now.revision!==expected)throw Error('적용 중 자료가 변경되었습니다. 새로고침하면 최신 자료로 다시 적용합니다.');
+   tx.update(ref,{activeGeneration:gen,annualNote:note,revision:expected+1,updatedAt:Date.now()});
+  });
+  toast(y+'년 고정지출을 2026년 9월 기준으로 적용했습니다.');
+ }catch(e){showError(e)}finally{busy=false;septemberFixRunning=false}
 }
 
 function rememberChoice(){try{return localStorage.getItem(REMEMBER_KEY)==='1'}catch{return false}}$('#rememberPassword').checked=rememberChoice();
