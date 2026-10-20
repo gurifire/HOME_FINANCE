@@ -19,38 +19,70 @@ function exportCsv(){const q=v=>'"'+String(v??'').replace(/"/g,'""')+'"';downloa
 const EMBEDDED_CONNECTION = {"firebaseConfig":{"apiKey":"AIzaSyBFLC0FRNhKjVwTqid3CQXE_Ha9BA3aiFU","authDomain":"home-2886f.firebaseapp.com","projectId":"home-2886f","storageBucket":"home-2886f.firebasestorage.app","messagingSenderId":"997740056902","appId":"1:997740056902:web:41fa29ca96a7b5affcd547"},"familyId":"family-main","sharedAccountEmail":"kdw8116@naver.com"};
 const ORIGINAL_LEDGER = document.getElementById('original-ledger-seed') ? JSON.parse(document.getElementById('original-ledger-seed').textContent) : null;
 let originalImportRunning=false,originalImportAttempted=false;
+let yearLoadToken=0,loadingYear=null,yearSubscriptionStarted=false,quotaBlocked=false;const fixedAttempts=new Set();
 let mode='none',role=null,currentUser=null,auth=null,fire=null,F=null,A=null,configuration=null,family='family-main',ready=false,activeGeneration='main',meta=null,unsubscribeMeta=null,unsubscribeEntries=null,unsubscribeYears=null,unsubscribeMember=null,unsubscribeAuth=null,epoch=0,busy=false,localStore={years:{}},editingCloudGen=null;
 const CONFIG_KEY='family-ledger-firebase-connection-v1',REMEMBER_KEY='family-ledger-remember-unlock-v1',LOCAL_KEY='family-ledger-local-years-v2';
 function newId(){return globalThis.crypto?.randomUUID?.()||'r-'+Date.now()+'-'+Math.random().toString(36).slice(2)}
 function validYear(y){return Number.isInteger(y)&&y>=1900&&y<=9999}
 function validRecord(r){return r&&typeof r.id==='string'&&/^[A-Za-z0-9_-]{1,150}$/.test(r.id)&&validYear(r.year)&&Number.isInteger(r.month)&&r.month>=1&&r.month<=12&&Number.isInteger(r.group)&&r.group>=0&&r.group<=3&&typeof r.day==='string'&&r.day.length<=50&&typeof r.category==='string'&&r.category.length<=200&&(r.amount===null||typeof r.amount==='number'&&Number.isFinite(r.amount)&&Math.abs(r.amount)<=1e12)&&['','현금','카드'].includes(r.method)&&typeof r.note==='string'&&r.note.length<=4000}
 function cleanRecord(r){return {id:r.id,year:r.year,month:r.month,group:r.group,day:r.day,category:r.category,amount:r.amount,method:r.method,note:r.note}}
-function showError(e){const messages={'permission-denied':'접근 권한이 없습니다. 가족 구성원 UID와 Firestore 규칙을 확인해 주세요.','auth/invalid-credential':'공용 암호를 확인해 주세요. 최초 설정한 연결용 계정도 확인해 주세요.','auth/invalid-login-credentials':'공용 암호를 확인해 주세요. 최초 설정한 연결용 계정도 확인해 주세요.','auth/invalid-api-key':'Firebase 웹 앱 설정의 apiKey를 확인해 주세요.','auth/operation-not-allowed':'Firebase Authentication에서 이메일/비밀번호 로그인을 켜 주세요.','auth/unauthorized-domain':'Firebase Authentication의 승인된 도메인을 확인해 주세요.','auth/network-request-failed':'네트워크 연결을 확인해 주세요.','unavailable':'인터넷 연결을 확인한 뒤 다시 시도해 주세요.','auth/too-many-requests':'로그인 시도가 많습니다. 잠시 후 다시 시도해 주세요.'};const t=messages[e?.code]||e?.message||'처리하지 못했습니다. 다시 시도해 주세요.';toast(t);$('#gateMessage').textContent=t;$('#settingsMessage').textContent=t;if(mode==='cloud')status(t,true);}
+function showError(e){if(e?.code==='resource-exhausted'||/quota exceeded/i.test(e?.message||''))quotaBlocked=true;const messages={'resource-exhausted':'Firebase 사용량 한도를 초과했습니다. 한도 초기화 후 앱을 다시 열어 주세요.','permission-denied':'접근 권한이 없습니다. 가족 구성원 UID와 Firestore 규칙을 확인해 주세요.','auth/invalid-credential':'공용 암호를 확인해 주세요. 최초 설정한 연결용 계정도 확인해 주세요.','auth/invalid-login-credentials':'공용 암호를 확인해 주세요. 최초 설정한 연결용 계정도 확인해 주세요.','auth/invalid-api-key':'Firebase 웹 앱 설정의 apiKey를 확인해 주세요.','auth/operation-not-allowed':'Firebase Authentication에서 이메일/비밀번호 로그인을 켜 주세요.','auth/unauthorized-domain':'Firebase Authentication의 승인된 도메인을 확인해 주세요.','auth/network-request-failed':'네트워크 연결을 확인해 주세요.','unavailable':'인터넷 연결을 확인한 뒤 다시 시도해 주세요.','auth/too-many-requests':'로그인 시도가 많습니다. 잠시 후 다시 시도해 주세요.'};const t=messages[e?.code]||e?.message||'처리하지 못했습니다. 다시 시도해 주세요.';toast(t);$('#gateMessage').textContent=t;$('#settingsMessage').textContent=t;if(mode==='cloud')status(t,true);}
 function status(t,error=false){$('#connectionStatus').textContent=t==='Firebase 동기화 완료'?'':t;$('#connectionStatus').classList.toggle('sync-error',error)}
 function readyForEdit(){if(busy){toast('자료를 처리 중입니다. 잠시 기다려 주세요.');return false}if(!ready){toast('암호를 입력하고 자료를 불러온 뒤 사용해 주세요.');return false}if(mode==='cloud'&&!navigator.onLine){toast('인터넷 연결 후 저장할 수 있습니다.');return false}return true}
 function syncYearControls(){$('#yearInput').value=year;$('#yearStatus').textContent=(mode==='cloud'?'가족 공유':'이 기기 전용')+' · '+year+'년'}
 function refresh(){if($('#modal').open)return;const active=document.activeElement;if(active?.classList.contains('noteinput'))return;const id=active?.id,pos=active?.selectionStart;render();if(id==='search'){$('#search').focus();if(pos!==null)$('#search').setSelectionRange(pos,pos)}}
-function clearListeners(){epoch++;for(const off of [unsubscribeMeta,unsubscribeEntries,unsubscribeYears,unsubscribeMember])if(off)off();unsubscribeMeta=unsubscribeEntries=unsubscribeYears=unsubscribeMember=null;ready=false;db={records:[],annualNote:''};meta=null;$('#modal').close();}
+function clearListeners(){epoch++;yearLoadToken++;loadingYear=null;yearSubscriptionStarted=false;fixedAttempts.clear();for(const off of [unsubscribeMeta,unsubscribeEntries,unsubscribeYears,unsubscribeMember])if(off)off();unsubscribeMeta=unsubscribeEntries=unsubscribeYears=unsubscribeMember=null;ready=false;db={records:[],annualNote:''};meta=null;$('#modal').close();}
 function gate(message){$('#appMain').hidden=true;$('#gate').hidden=false;$('#gateMessage').textContent=message;$('#nav').innerHTML='';}
 function openSettings(){$('#configText').value=JSON.stringify(configuration?.firebaseConfig||{},null,2);$('#familyId').value=configuration?.familyId||'family-main';$('#sharedAccount').value=configuration?.sharedAccountEmail||'';$('#settingsMessage').textContent='';$('#settings').showModal()}
 function readSettings(){let text=$('#configText').value.trim();if(!text.startsWith('{')){const a=text.indexOf('{'),b=text.lastIndexOf('}');text=text.slice(a,b+1)}let c;try{c=JSON.parse(text)}catch{try{c=JSON.parse(text.replace(/([,{]\s*)([A-Za-z_$][\w$]*)\s*:/g,'$1"$2":').replace(/'([^'\n]*)'/g,(_,s)=>JSON.stringify(s)).replace(/,\s*}/g,'}'))}catch{throw Error('firebaseConfig 객체 전체를 붙여넣어 주세요.')}}const allowed=['apiKey','authDomain','projectId','storageBucket','messagingSenderId','appId','measurementId'];const config={};for(const k of allowed)if(typeof c[k]==='string')config[k]=c[k];if(!['apiKey','projectId','appId','authDomain'].every(k=>config[k]))throw Error('apiKey, authDomain, projectId, appId가 필요합니다.');const familyId=$('#familyId').value.trim();if(!/^[A-Za-z0-9_-]{1,80}$/.test(familyId))throw Error('가족 ID는 영문·숫자·밑줄·하이픈으로 입력해 주세요.');const sharedAccountEmail=$('#sharedAccount').value.trim();if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(sharedAccountEmail))throw Error('Firebase에 생성한 공용 계정 이메일을 입력해 주세요.');return {firebaseConfig:config,familyId,sharedAccountEmail}}
 async function saveSettings(){try{if(busy)throw Error('자료 처리 후 설정을 변경해 주세요.');const c=readSettings();localStorage.setItem(CONFIG_KEY,JSON.stringify(c));$('#settings').close();configuration=c;await connectFirebase()}catch(e){showError(e)}}
 function downloadConfigured(){try{const c=readSettings();const html=document.documentElement.outerHTML;const source=html.replace(/const EMBEDDED_CONNECTION = [^\n]*;/,'const EMBEDDED_CONNECTION = '+JSON.stringify(c).replace(/</g,'\\u003c')+';');/* Export original application shell, never current rendered financial DOM. */const parser=new DOMParser();const doc=parser.parseFromString(source,'text/html');doc.querySelector('#original-ledger-seed')?.remove();doc.querySelector('#cards').replaceChildren();doc.querySelector('#overview').replaceChildren();doc.querySelector('#details').replaceChildren();doc.querySelector('#months').replaceChildren();doc.querySelector('#nav').replaceChildren();doc.querySelector('#categories').replaceChildren();doc.querySelector('#appMain').hidden=true;doc.querySelector('#gate').hidden=false;doc.querySelector('#identity').textContent='';doc.querySelector('#connectionStatus').textContent='연결 전';doc.querySelector('#gateMessage').textContent='가족 공용 암호를 입력해 주세요.';for(const el of doc.querySelectorAll('dialog'))el.removeAttribute('open');for(const el of doc.querySelectorAll('input')){el.removeAttribute('value');el.removeAttribute('checked');}for(const el of doc.querySelectorAll('textarea'))el.textContent='';for(const sel of doc.querySelectorAll('select'))sel.replaceChildren();const gr=doc.querySelector('#form select[name="group"]');for(const [i,g]of groups.entries()){const o=doc.createElement('option');o.value=i;o.textContent=g;gr.append(o)}const me=doc.querySelector('#form select[name="method"]');for(const [v,t]of [['현금','현금'],['카드','카드'],['','미입력']]){const o=doc.createElement('option');o.value=v;o.textContent=t;me.append(o)}download('<!doctype html>\n'+doc.documentElement.outerHTML,'text/html;charset=utf-8','index.html');toast('설정이 포함된 index.html을 내려받았습니다.')}catch(e){showError(e)}}
-async function connectFirebase(){if(unsubscribeAuth)unsubscribeAuth();unsubscribeAuth=null;clearListeners();mode='cloud';role=null;status('Firebase 연결 중');gate('Firebase 연결 중입니다.');try{const sdk='https://www.gstatic.com/firebasejs/13.0.0/';const [app,authModule,fireModule]=await Promise.all([import(sdk+'firebase-app.js'),import(sdk+'firebase-auth.js'),import(sdk+'firebase-firestore.js')]);A=authModule;F=fireModule;family=configuration.familyId;const name=configuration.firebaseConfig.projectId+'-'+family+'-shared-password';const fb=app.getApps().find(a=>a.name===name)||app.initializeApp(configuration.firebaseConfig,name);auth=A.getAuth(fb);await A.setPersistence(auth,rememberChoice()?A.browserLocalPersistence:A.browserSessionPersistence);fire=F.getFirestore(fb);unsubscribeAuth=A.onAuthStateChanged(auth,async user=>{if(mode!=='cloud')return;clearListeners();currentUser=user;$('#logout').hidden=!user;$('#identity').textContent='';if(!user){gate('가족 공용 암호를 입력해 주세요.');status('암호 입력 필요');return}gate('가족 권한을 확인하고 있습니다.');const token=epoch;unsubscribeMember=F.onSnapshot(F.doc(fire,'families',family,'members',user.uid),async snapshot=>{if(token!==epoch)return;const member=snapshot.data();if(!snapshot.exists()||!['owner','editor'].includes(member.role)){ready=false;db={records:[],annualNote:''};$('#modal').close();if(unsubscribeMeta)unsubscribeMeta();if(unsubscribeEntries)unsubscribeEntries();if(unsubscribeYears)unsubscribeYears();unsubscribeMeta=unsubscribeEntries=unsubscribeYears=null;gate('가족 권한이 없습니다. 관리자에게 다음 UID 등록을 요청하세요.\nUID: '+user.uid);status('가족 권한 없음',true);return}role=member.role;if(!unsubscribeYears){unsubscribeYears=F.onSnapshot(F.collection(fire,'families',family,'years'),()=>{},e=>showError(e));await loadYear(year)}else if(ready)refresh()},e=>{ready=false;gate('권한 확인에 실패했습니다. Firestore 규칙을 확인해 주세요.');showError(e)})});}catch(e){gate('Firebase에 연결하지 못했습니다. 연결 설정과 인터넷 상태를 확인해 주세요.');showError(e)}}
+async function connectFirebase(){if(unsubscribeAuth)unsubscribeAuth();unsubscribeAuth=null;clearListeners();mode='cloud';role=null;status('Firebase 연결 중');gate('Firebase 연결 중입니다.');try{const sdk='https://www.gstatic.com/firebasejs/13.0.0/';const [app,authModule,fireModule]=await Promise.all([import(sdk+'firebase-app.js'),import(sdk+'firebase-auth.js'),import(sdk+'firebase-firestore.js')]);A=authModule;F=fireModule;family=configuration.familyId;const name=configuration.firebaseConfig.projectId+'-'+family+'-shared-password';const fb=app.getApps().find(a=>a.name===name)||app.initializeApp(configuration.firebaseConfig,name);auth=A.getAuth(fb);await A.setPersistence(auth,rememberChoice()?A.browserLocalPersistence:A.browserSessionPersistence);try{fire=F.initializeFirestore(fb,{localCache:F.persistentLocalCache({tabManager:F.persistentMultipleTabManager()})})}catch(e){if(e.code!=='failed-precondition')throw e;fire=F.getFirestore(fb)}unsubscribeAuth=A.onAuthStateChanged(auth,async user=>{if(mode!=='cloud')return;clearListeners();currentUser=user;$('#logout').hidden=!user;$('#identity').textContent='';if(!user){gate('가족 공용 암호를 입력해 주세요.');status('암호 입력 필요');return}gate('가족 권한을 확인하고 있습니다.');const token=epoch;unsubscribeMember=F.onSnapshot(F.doc(fire,'families',family,'members',user.uid),async snapshot=>{if(token!==epoch)return;const member=snapshot.data();if(!snapshot.exists()||!['owner','editor'].includes(member.role)){ready=false;db={records:[],annualNote:''};$('#modal').close();if(unsubscribeMeta)unsubscribeMeta();if(unsubscribeEntries)unsubscribeEntries();if(unsubscribeYears)unsubscribeYears();unsubscribeMeta=unsubscribeEntries=unsubscribeYears=null;gate('가족 권한이 없습니다. 관리자에게 다음 UID 등록을 요청하세요.\nUID: '+user.uid);status('가족 권한 없음',true);return}role=member.role;if(!yearSubscriptionStarted){yearSubscriptionStarted=true;await loadYear(year)}else if(ready)refresh()},e=>{ready=false;gate('권한 확인에 실패했습니다. Firestore 규칙을 확인해 주세요.');showError(e)})});}catch(e){gate('Firebase에 연결하지 못했습니다. 연결 설정과 인터넷 상태를 확인해 주세요.');showError(e)}}
 $('#loginForm').onsubmit=async e=>{e.preventDefault();if(!auth||!configuration?.sharedAccountEmail){openSettings();return}const b=$('#loginButton');b.disabled=true;try{const remember=$('#rememberPassword').checked;await A.setPersistence(auth,remember?A.browserLocalPersistence:A.browserSessionPersistence);await A.signInWithEmailAndPassword(auth,configuration.sharedAccountEmail,$('#password').value);if(remember)localStorage.setItem(REMEMBER_KEY,'1');else localStorage.removeItem(REMEMBER_KEY);$('#password').value=''}catch(err){showError(err)}finally{b.disabled=false}};
 async function logout(){if(busy){toast('자료 처리 후 잠가 주세요.');return}localStorage.removeItem(REMEMBER_KEY);$('#rememberPassword').checked=false;$('#password').value='';if(mode==='cloud'&&auth)await A.signOut(auth);else{clearListeners();mode='none';gate('공용 암호를 입력하거나 기기 전용 모드를 선택해 주세요.');status('연결 전');$('#identity').textContent='';$('#logout').hidden=true}}
 function yearRef(y=year){return F.doc(fire,'families',family,'years',String(y))}
 function entryCollection(y=year,g=activeGeneration){return F.collection(fire,'families',family,'years',String(y),'generations',g,'entries')}
 async function ensureYear(y){const ref=yearRef(y);await F.runTransaction(fire,async tx=>{const snap=await tx.get(ref);if(!snap.exists())tx.set(ref,{activeGeneration:'main',annualNote:'',revision:0,updatedAt:Date.now()})});return ref}
-async function loadYear(y){if(unsubscribeMeta)unsubscribeMeta();if(unsubscribeEntries)unsubscribeEntries();unsubscribeMeta=unsubscribeEntries=null;ready=false;year=y;db={records:[],annualNote:''};$('#modal').close();const token=epoch;try{const ref=await ensureYear(y);if(token!==epoch||year!==y)return;$('#gate').hidden=true;$('#appMain').hidden=false;render();status(y+'년 불러오는 중');unsubscribeMeta=F.onSnapshot(ref,{includeMetadataChanges:true},snap=>{if(token!==epoch||year!==y)return;if(!snap.exists())return;const next=snap.data();db.annualNote=next.annualNote||'';meta=next;if(activeGeneration!==next.activeGeneration||!unsubscribeEntries){activeGeneration=next.activeGeneration;ready=false;db.records=[];if(unsubscribeEntries)unsubscribeEntries();const gen=activeGeneration;unsubscribeEntries=F.onSnapshot(entryCollection(y,gen),{includeMetadataChanges:true},entries=>{if(token!==epoch||year!==y||gen!==activeGeneration)return;db.records=entries.docs.map(d=>d.data()).sort((a,b)=>a.month-b.month||a.group-b.group||a.id.localeCompare(b.id,'en',{numeric:true}));ready=!entries.metadata.fromCache&&!entries.metadata.hasPendingWrites;status(ready?'Firebase 동기화 완료':navigator.onLine?'서버 확인 중':'오프라인 · 읽기 전용');refresh();if(ready){applyOriginalLedgerIfEmpty();applySeptemberFixedExpenses()}},e=>{ready=false;status('자료 읽기 실패',true);showError(e)})}else refresh()},e=>{ready=false;showError(e)});}catch(e){ready=false;showError(e)}}
-async function changeYear(y){if(!validYear(y)){toast('1900~9999년 사이의 연도를 입력해 주세요.');$('#yearInput').value=year;return}if(busy){toast('자료 처리 후 연도를 바꿔 주세요.');return}if(!ready&&mode==='cloud'){toast('자료를 불러오는 중입니다.');return}if($('#modal').open){toast('수정 창을 닫은 뒤 연도를 바꿔 주세요.');return}if(mode==='cloud')await loadYear(y);else if(mode==='local'){year=y;db=structuredClone(localStore.years[year]||{records:[],annualNote:''});render();applySeptemberFixedExpenses()}}
+async function loadYear(y){
+ if(quotaBlocked)return;
+ if(loadingYear===y||(year===y&&unsubscribeMeta&&unsubscribeEntries&&ready))return;
+ const request=++yearLoadToken;loadingYear=y;
+ if(unsubscribeMeta)unsubscribeMeta();if(unsubscribeEntries)unsubscribeEntries();unsubscribeMeta=unsubscribeEntries=null;
+ ready=false;year=y;db={records:[],annualNote:''};$('#modal').close();const token=epoch;
+ const current=()=>request===yearLoadToken&&token===epoch&&year===y&&mode==='cloud';
+ try{
+  const ref=yearRef(y);
+  // Existing years need no extra transaction/read before attaching the listener.
+  $('#gate').hidden=true;$('#appMain').hidden=false;render();status(y+'년 불러오는 중');
+  let creating=false;
+  unsubscribeMeta=F.onSnapshot(ref,{includeMetadataChanges:true},snap=>{
+   if(!current())return;
+   if(!snap.exists()){
+    if(snap.metadata.fromCache||creating)return;
+    creating=true;ensureYear(y).catch(e=>{if(current())showError(e)}).finally(()=>creating=false);return;
+   }
+   const next=snap.data();db.annualNote=next.annualNote||'';meta=next;
+   if(activeGeneration!==next.activeGeneration||!unsubscribeEntries){
+    activeGeneration=next.activeGeneration;ready=false;db.records=[];if(unsubscribeEntries)unsubscribeEntries();const gen=activeGeneration;
+    unsubscribeEntries=F.onSnapshot(entryCollection(y,gen),{includeMetadataChanges:true},entries=>{
+     if(!current()||gen!==activeGeneration)return;
+     db.records=entries.docs.map(d=>d.data()).sort((a,b)=>a.month-b.month||a.group-b.group||a.id.localeCompare(b.id,'en',{numeric:true}));
+     ready=!entries.metadata.fromCache&&!entries.metadata.hasPendingWrites&&navigator.onLine;
+     status(ready?'Firebase 동기화 완료':navigator.onLine?'서버 확인 중':'오프라인 · 읽기 전용');refresh();
+     if(ready&&!quotaBlocked){applyOriginalLedgerIfEmpty();applySeptemberFixedExpenses()}
+    },e=>{if(!current())return;ready=false;if(unsubscribeEntries)unsubscribeEntries();unsubscribeEntries=null;status('자료 읽기 실패',true);showError(e)});
+   }else refresh();
+  },e=>{if(!current())return;ready=false;if(unsubscribeMeta)unsubscribeMeta();if(unsubscribeEntries)unsubscribeEntries();unsubscribeMeta=unsubscribeEntries=null;showError(e)});
+ }catch(e){if(current()){ready=false;showError(e)}}finally{if(request===yearLoadToken)loadingYear=null}
+}
+async function changeYear(y){if(y===year)return;if(!validYear(y)){toast('1900~9999년 사이의 연도를 입력해 주세요.');$('#yearInput').value=year;return}if(busy){toast('자료 처리 후 연도를 바꿔 주세요.');return}if(!ready&&mode==='cloud'){toast('자료를 불러오는 중입니다.');return}if($('#modal').open){toast('수정 창을 닫은 뒤 연도를 바꿔 주세요.');return}if(mode==='cloud')await loadYear(y);else if(mode==='local'){year=y;db=structuredClone(localStore.years[year]||{records:[],annualNote:''});render();applySeptemberFixedExpenses()}}
 function addYear(){const v=prompt('사용할 연도를 입력하세요. (1900~9999)',String(year));if(v!==null)changeYear(Number(v))}
 function saveLocal(){localStore.years[year]=structuredClone(db);localStorage.setItem(LOCAL_KEY,JSON.stringify(localStore));render()}
 function startLocal(){if(busy)return;clearListeners();mode='local';role='owner';currentUser=null;try{localStore=JSON.parse(localStorage.getItem(LOCAL_KEY))||{years:{}};if(!localStore.years)localStore={years:{}}}catch{localStore={years:{}}}db=structuredClone(localStore.years[year]||{records:[],annualNote:''});ready=true;if(ORIGINAL_LEDGER&&!localStore.original2026Applied&&!localStore.years[2026]?.records?.length&&!localStore.years[2026]?.annualNote){localStore.years[2026]={records:ORIGINAL_LEDGER.records.map(r=>({...cleanRecord(r),year:2026})),annualNote:ORIGINAL_LEDGER.annualNote||''};localStore.original2026Applied=true;try{localStorage.setItem(LOCAL_KEY,JSON.stringify(localStore));db=structuredClone(localStore.years[year]||{records:[],annualNote:''})}catch(e){showError(Error('기존 자료 저장에 실패했습니다. 저장 공간을 확인해 주세요.'))}}$('#gate').hidden=true;$('#appMain').hidden=false;$('#logout').hidden=false;$('#identity').textContent='기기 전용 모드';status('이 브라우저에만 저장');render();applySeptemberFixedExpenses()}
 async function writeRecord(record,base){if(mode==='local'){const previous=structuredClone(db);if(record){if(base)db.records[db.records.findIndex(r=>r.id===base.id)]=record;else db.records.push(record)}else db.records=db.records.filter(r=>r.id!==base.id);try{saveLocal()}catch(e){db=previous;throw Error('브라우저 저장에 실패했습니다. 백업 후 저장 공간을 확인해 주세요.')}return}const y=year,g=activeGeneration,id=record?.id||base.id,expected=base?.rev||0;const ref=F.doc(entryCollection(y,g),id);await F.runTransaction(fire,async tx=>{const [ys,rs]=await Promise.all([tx.get(yearRef(y)),tx.get(ref)]);if(ys.data()?.activeGeneration!==g||(record&&$('#modal').open&&editingCloudGen!==g))throw Error('복원으로 자료가 변경되었습니다. 창을 닫고 다시 열어 주세요.');if(base?(!rs.exists()||rs.data().rev!==expected):rs.exists())throw Error('가족이 이 내역을 변경했습니다. 창을 닫고 최신 내역을 확인해 주세요.');if(record)tx.set(ref,{...cleanRecord(record),rev:expected+1});else tx.delete(ref);tx.update(yearRef(y),{revision:ys.data().revision+1,updatedAt:Date.now()})})}
 async function saveNote(text,base){if(!readyForEdit())return;if(text.length>20000){toast('연간 메모는 20,000자 이내입니다.');return}try{if(mode==='local'){const prev=db.annualNote;db.annualNote=text;try{saveLocal()}catch(e){db.annualNote=prev;throw e}}else{await F.runTransaction(fire,async tx=>{const ref=yearRef(),snap=await tx.get(ref);if(snap.data().annualNote!==(base||''))throw Error('가족이 연간 메모를 수정했습니다. 최신 내용을 확인한 뒤 다시 저장해 주세요.');tx.update(ref,{annualNote:text,revision:snap.data().revision+1,updatedAt:Date.now()})})}toast('메모를 저장했습니다')}catch(e){showError(e)}}
 async function restoreYear(y,records,note,onlyIfPristine=false){if(busy)throw Error('이미 자료를 처리 중입니다.');busy=true;try{if(mode==='local'){const previous=structuredClone(localStore);localStore.years[y]={records,annualNote:note};try{localStorage.setItem(LOCAL_KEY,JSON.stringify(localStore))}catch(e){localStore=previous;throw e}year=y;db=structuredClone(localStore.years[y]);render();return}if(role!=='owner')throw Error('관리자만 복원할 수 있습니다.');if(!navigator.onLine)throw Error('온라인에서만 복원할 수 있습니다.');const ref=await ensureYear(y),before=await F.getDocFromServer(ref),expected=before.data(),gen='restore-'+newId();if(onlyIfPristine&&(expected.revision!==0||expected.annualNote))throw Error('이미 변경된 연도이므로 기존 자료 자동 적용을 건너뛰었습니다.');status('복원 준비 중 · 기존 자료는 유지됩니다');for(let i=0;i<records.length;i+=250){const batch=F.writeBatch(fire);for(const r of records.slice(i,i+250))batch.set(F.doc(entryCollection(y,gen),r.id),{...cleanRecord(r),rev:1});await batch.commit();status('자료 이전 중 '+Math.min(i+250,records.length)+' / '+records.length)}await F.runTransaction(fire,async tx=>{const now=await tx.get(ref);if(now.data().revision!==expected.revision||now.data().activeGeneration!==expected.activeGeneration)throw Error('이전 중 가족이 자료를 수정했습니다. 기존 자료는 유지되며 복원이 적용되지 않았습니다. 다시 시도해 주세요.');tx.update(ref,{activeGeneration:gen,annualNote:note,revision:now.data().revision+1,updatedAt:Date.now()})});await loadYear(y)}finally{busy=false}}
-window.addEventListener('online',()=>{if(mode==='cloud'){status('연결 복구 중');if(role&&!busy)loadYear(year)}});window.addEventListener('offline',()=>{if(mode==='cloud'){ready=false;status('오프라인 · 읽기 전용',true)}});
+window.addEventListener('online',()=>{if(mode==='cloud'){status('연결 복구 중');if(role&&!busy&&!quotaBlocked&&(!unsubscribeMeta||!unsubscribeEntries))loadYear(year)}});window.addEventListener('offline',()=>{if(mode==='cloud'){ready=false;status('오프라인 · 읽기 전용',true)}});
 
 async function applyOriginalLedgerIfEmpty(){
  if(!ORIGINAL_LEDGER||originalImportAttempted||originalImportRunning||busy||mode!=='cloud'||role!=='owner'||year!==2026||!ready||db.records.length||db.annualNote||meta?.revision!==0)return;
@@ -59,52 +91,63 @@ async function applyOriginalLedgerIfEmpty(){
 }
 
 
-// Apply September 2026 fixed expenses once to each target year.
+// Fixed expenses: update only changed records, with server-side monthly checkpoints.
 let septemberFixRunning=false;
 function septemberFixedRecords(records,sourceRecords=records,targetYear=2026){
- const source=sourceRecords.filter(r=>r.month===9&&r.group===1);
- if(!source.length)return null;
+ const source=sourceRecords.filter(r=>r.month===9&&r.group===1);if(!source.length)return null;
  const months=Array.from({length:targetYear===2026?3:12},(_,i)=>i+(targetYear===2026?10:1));
  return records.filter(r=>!(months.includes(r.month)&&r.group===1)).map(r=>({...r})).concat(months.flatMap(m=>source.map((r,i)=>({...cleanRecord(r),id:'sept2026-'+m+'-'+i,year:targetYear,month:m}))));
 }
+function fixedMonthChanges(existing,desired,m){
+ const old=new Map(existing.filter(r=>r.month===m&&r.group===1).map(r=>[r.id,r]));
+ const changes=[];
+ for(const r of desired.filter(r=>r.month===m&&r.group===1)){
+  const base=old.get(r.id);old.delete(r.id);
+  if(!base||JSON.stringify(cleanRecord(base))!==JSON.stringify(cleanRecord(r)))changes.push({record:cleanRecord(r),rev:(base?.rev||0)+1});
+ }
+ return {changes,deletes:[...old.values()]};
+}
 async function applySeptemberFixedExpenses(){
- if(septemberFixRunning||busy||!ready||year<2026)return;
+ if(septemberFixRunning||busy||!ready||year<2026||quotaBlocked)return;
  const y=year,prefix=y===2026?'septfixed2026-':'septfixedfuture2026-';
  if(mode==='local'){
   if(y===2026?localStore.septemberFixed2026Applied:localStore.septemberFixedYears?.[y])return;
   const next=septemberFixedRecords(db.records,localStore.years[2026]?.records||[],y);if(!next)return;
   const previous=structuredClone(localStore),oldDb=db;
-  try{db={...db,records:next};if(y===2026)localStore.septemberFixed2026Applied=true;else{localStore.septemberFixedYears||={};localStore.septemberFixedYears[y]=true}saveLocal();toast(y+'년 고정지출을 2026년 9월 기준으로 적용했습니다.')}catch(e){localStore=previous;db=oldDb;showError(e)}
-  return;
+  try{db={...db,records:next};if(y===2026)localStore.septemberFixed2026Applied=true;else{localStore.septemberFixedYears||={};localStore.septemberFixedYears[y]=true}saveLocal();toast(y+'년 고정지출을 2026년 9월 기준으로 적용했습니다.')}catch(e){localStore=previous;db=oldDb;showError(e)}return;
  }
  if(mode!=='cloud'||role!=='owner'||activeGeneration.startsWith(prefix))return;
+ const months=Array.from({length:y===2026?3:12},(_,i)=>i+(y===2026?10:1));
+ if(months.every(m=>(meta.fixedExpenseMonths609||[]).includes(m)))return;
+ const attempt=family+'/'+y+'/'+activeGeneration;if(fixedAttempts.has(attempt))return;fixedAttempts.add(attempt);
  septemberFixRunning=true;busy=true;
- const g=activeGeneration,expected=meta.revision,token=epoch,note=db.annualNote,existing=structuredClone(db.records),gen=prefix+newId();
+ const g=activeGeneration,token=epoch,request=yearLoadToken,existing=structuredClone(db.records);let expected=meta.revision;
+ const done=new Set(meta.fixedExpenseMonths609||[]);
  try{
   if(!navigator.onLine)throw Error('인터넷 연결 후 고정지출을 적용할 수 있습니다.');
   let source=existing,sourceMeta=null;
   if(y>2026){
-   const snap=await F.getDocFromServer(yearRef(2026));
-   if(!snap.exists())return;
-   sourceMeta=snap.data();
-   const entries=await F.getDocsFromServer(entryCollection(2026,sourceMeta.activeGeneration));
+   const snap=await F.getDocFromServer(yearRef(2026));if(!snap.exists())return;sourceMeta=snap.data();
+   const entries=await F.getDocsFromServer(F.query(entryCollection(2026,sourceMeta.activeGeneration),F.where('month','==',9),F.where('group','==',1)));
    source=entries.docs.map(d=>d.data());
   }
   const next=septemberFixedRecords(existing,source,y);if(!next)return;
-  for(let i=0;i<next.length;i+=250){
-   if(token!==epoch||mode!=='cloud'||year!==y)throw Error('연결 상태가 바뀌었습니다. 다시 접속해 주세요.');
-   const batch=F.writeBatch(fire);
-   for(const r of next.slice(i,i+250))batch.set(F.doc(entryCollection(y,gen),r.id),{...cleanRecord(r),rev:1});
-   await batch.commit();
+  for(const m of months){
+   if(done.has(m))continue;
+   if(token!==epoch||request!==yearLoadToken||mode!=='cloud'||year!==y)throw Error('연결 상태가 바뀌었습니다. 다시 접속해 주세요.');
+   const plan=fixedMonthChanges(existing,next,m);
+   if(plan.changes.length+plan.deletes.length>450)throw Error('고정지출 건수가 많아 자동 적용을 중단했습니다. 기존 자료는 유지됩니다.');
+   await F.runTransaction(fire,async tx=>{
+    const ref=yearRef(y),snap=await tx.get(ref),now=snap.data();
+    if(sourceMeta){const src=await tx.get(yearRef(2026));if(src.data()?.revision!==sourceMeta.revision||src.data()?.activeGeneration!==sourceMeta.activeGeneration)throw Error('기준 자료가 변경되었습니다. 새로고침 후 다시 적용해 주세요.');}
+    if(token!==epoch||request!==yearLoadToken||now.activeGeneration!==g||now.revision!==expected)throw Error('가족이 자료를 변경했습니다. 완료된 월은 유지됩니다. 새로고침 후 나머지를 적용해 주세요.');
+    for(const {record,rev}of plan.changes)tx.set(F.doc(entryCollection(y,g),record.id),{...record,rev});
+    for(const r of plan.deletes)tx.delete(F.doc(entryCollection(y,g),r.id));
+    tx.update(ref,{fixedExpenseMonths609:[...done,m].sort((a,b)=>a-b),revision:expected+1,updatedAt:Date.now()});
+   });done.add(m);expected++;
   }
-  await F.runTransaction(fire,async tx=>{
-   const ref=yearRef(y),snap=await tx.get(ref),now=snap.data();
-   if(sourceMeta){const sourceSnap=await tx.get(yearRef(2026));if(sourceSnap.data()?.revision!==sourceMeta.revision||sourceSnap.data()?.activeGeneration!==sourceMeta.activeGeneration)throw Error('기준 자료가 변경되었습니다. 새로고침 후 다시 적용해 주세요.');}
-   if(token!==epoch||now.activeGeneration!==g||now.revision!==expected)throw Error('적용 중 자료가 변경되었습니다. 새로고침하면 최신 자료로 다시 적용합니다.');
-   tx.update(ref,{activeGeneration:gen,annualNote:note,revision:expected+1,updatedAt:Date.now()});
-  });
   toast(y+'년 고정지출을 2026년 9월 기준으로 적용했습니다.');
- }catch(e){showError(e)}finally{busy=false;septemberFixRunning=false}
+ }catch(e){if(e.code==='permission-denied')e=Error('고정지출 적용에는 패키지의 firestore.rules를 Firebase 규칙에 게시해야 합니다.');showError(e)}finally{busy=false;septemberFixRunning=false}
 }
 
 function rememberChoice(){try{return localStorage.getItem(REMEMBER_KEY)==='1'}catch{return false}}$('#rememberPassword').checked=rememberChoice();
