@@ -213,7 +213,10 @@ async function applySeptemberFixedExpenses(){
 }
 
 function rememberChoice(){try{return localStorage.getItem(REMEMBER_KEY)==='1'}catch{return false}}$('#rememberPassword').checked=rememberChoice();
-try{configuration=EMBEDDED_CONNECTION||JSON.parse(localStorage.getItem(CONFIG_KEY))}catch{}if(configuration?.sharedAccountEmail)connectFirebase();else gate('Firebase 최초 연결 설정 후 공용 암호로 열어 주세요. 연결 전에는 기기 전용 모드를 사용할 수 있습니다.');
+try{configuration=EMBEDDED_CONNECTION||JSON.parse(localStorage.getItem(CONFIG_KEY))}catch{}
+// Preserve embedded connection settings on this device before future HTML updates.
+if(configuration?.sharedAccountEmail&&configuration?.firebaseConfig?.projectId){try{localStorage.setItem(CONFIG_KEY,JSON.stringify(configuration))}catch{}}
+if(configuration?.sharedAccountEmail)connectFirebase();else gate('Firebase 최초 연결 설정 후 공용 암호로 열어 주세요. 연결 전에는 기기 전용 모드를 사용할 수 있습니다.');
 
 
 // Double-back protection is part of the exported HTML, independent of cached pwa.js.
